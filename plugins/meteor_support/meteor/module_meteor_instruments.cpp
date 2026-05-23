@@ -1,25 +1,29 @@
 #include "module_meteor_instruments.h"
-#include <fstream>
-#include "logger.h"
-#include <filesystem>
-#include "imgui/imgui.h"
-#include "common/utils.h"
-#include "meteor.h"
-#include "products/image_products.h"
 #include "common/simple_deframer.h"
 #include "common/tracking/tle.h"
-#include "products/dataset.h"
-#include "resources.h"
-#include "nlohmann/json_utils.h"
+#include "common/utils.h"
+#include "core/resources.h"
+#include "imgui/imgui.h"
+#include "init.h"
 #include "instruments/msumr/msumr_tlm.h"
+#include "instruments/msumr/offsets.h"
+#include "logger.h"
+#include "meteor.h"
+#include "nlohmann/json_utils.h"
+#include "products/dataset.h"
+#include "products/image/channel_transform.h"
+#include "products/image_product.h"
+#include "utils/stats.h"
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 namespace meteor
 {
     namespace instruments
     {
         MeteorInstrumentsDecoderModule::MeteorInstrumentsDecoderModule(std::string input_file, std::string output_file_hint, nlohmann::json parameters)
-            : ProcessingModule(input_file, output_file_hint, parameters),
-            bism_reader(getValueOrDefault<int>(parameters["year_override"], -1))
+            : ProcessingModule(input_file, output_file_hint, parameters), bism_reader(getValueOrDefault<int>(parameters["year_override"], -1))
         {
         }
 
@@ -90,6 +94,7 @@ namespace meteor
                     {
                         double timestamp = bism_day + (msumr_frame[8]) * 3600.0 + (msumr_frame[9]) * 60.0 + (msumr_frame[10] + 0.0) + double(msumr_frame[11] / 255.0);
                         timestamp -= 3 * 3600.0;
+                        // logger->trace("%f H%d M%d S%d BS%d", timestamp, msumr_frame[8], msumr_frame[9], msumr_frame[10], msumr_frame[11]);
                         msumr_timestamps.push_back(timestamp);
                         mtvza_reader.latest_msumr_timestamp = mtvza_reader2.latest_msumr_timestamp = timestamp; // MTVZA doesn't have timestamps of its own, so use MSU-MR's
                     }
@@ -100,7 +105,7 @@ namespace meteor
                     }
 
                     msumr_ids.push_back(msumr_frame[12] >> 4);
-                    parseMSUMRTelemetry(msu_mr_telemetry, msu_mr_telemetry_calib, msumr_timestamps.size() - 1, msumr_frame.data());
+                    parseMSUMRTelemetry(msu_mr_telemetry, msu_mr_telemetry_calib, msumr_timestamps.size() - 1, msumr_frame.data(), HRPT);
                 }
 
                 // MTVZA Deframing
@@ -131,7 +136,7 @@ namespace meteor
             data_in.close();
 
             // Identify satellite, and apply per-sat settings...
-            int msumr_serial_number = most_common(msumr_ids.begin(), msumr_ids.end(), -1);
+            int msumr_serial_number = satdump::most_common(msumr_ids.begin(), msumr_ids.end(), -1);
             msumr_ids.clear();
 
             std::string sat_name = "Unknown Meteor";
@@ -159,9 +164,9 @@ namespace meteor
                 norad = 59051; // M2-4, WAITING FOR NORAD
 
             // Products dataset
-            satdump::ProductDataSet dataset;
+            satdump::products::DataSet dataset;
             dataset.satellite_name = sat_name;
-            dataset.timestamp = get_median(msumr_timestamps);
+            dataset.timestamp = satdump::get_median(msumr_timestamps);
 
             // Satellite ID
             {
@@ -181,12 +186,9 @@ namespace meteor
                 logger->info("----------- MSU-MR");
                 logger->info("Lines : " + std::to_string(msumr_reader.lines));
 
-                satdump::ImageProducts msumr_products;
+                satdump::products::ImageProduct msumr_products;
                 msumr_products.instrument_name = "msu_mr";
-                msumr_products.bit_depth = 10;
-                msumr_products.has_timestamps = true;
-                msumr_products.timestamp_type = satdump::ImageProducts::TIMESTAMP_LINE;
-                msumr_products.set_tle(satdump::general_tle_registry->get_from_norad_time(norad, dataset.timestamp));
+                auto tle = satdump::db_tle->get_from_norad_time(norad, dataset.timestamp);
 
                 std::vector<double> filter_timestamps = msumr_timestamps;
                 double last = 0;
@@ -210,49 +212,57 @@ namespace meteor
                     // logger->info(v);
                 }
 
+                // METEOR got messed up timestamp on the regular... "FIX" them
+                if (filter_timestamps.size() > 2)
+                {
+                    for (int i = 1; i < filter_timestamps.size() - 1; i++)
+                    {
+                        auto &prev = filter_timestamps[i - 1];
+                        auto &curr = filter_timestamps[i];
+
+                        if (curr == -1 && prev != -1)
+                            curr = prev + 0.16;
+                    }
+                }
                 // for (double &v : filter_timestamps)
                 //     logger->info(v);
 
-                msumr_products.set_timestamps(filter_timestamps);
                 if (msumr_serial_number == 0)
-                    msumr_products.set_proj_cfg(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2_msumr.json")));
+                    msumr_products.set_proj_cfg_tle_timestamps(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2_msumr.json")), tle, filter_timestamps);
                 else if (msumr_serial_number == 2)
-                    msumr_products.set_proj_cfg(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-2_msumr.json")));
+                    msumr_products.set_proj_cfg_tle_timestamps(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-2_msumr.json")), tle, filter_timestamps);
                 else if (msumr_serial_number == 3)
-                    msumr_products.set_proj_cfg(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-3_msumr.json")));
+                    msumr_products.set_proj_cfg_tle_timestamps(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-3_msumr.json")), tle, filter_timestamps);
                 else if (msumr_serial_number == 4)
-                    msumr_products.set_proj_cfg(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-4_msumr.json")));
+                    msumr_products.set_proj_cfg_tle_timestamps(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-4_msumr.json")), tle, filter_timestamps);
+
+                auto msu_cfg = loadJsonFile(resources::getResourcePath("calibration/MSU-MR.json"));
 
                 for (int i = 0; i < 6; i++)
-                    msumr_products.images.push_back({"MSU-MR-" + std::to_string(i + 1), std::to_string(i + 1), msumr_reader.getChannel(i)});
+                {
+                    msumr_products.images.push_back(
+                        {i, "MSU-MR-" + std::to_string(i + 1), std::to_string(i + 1), msumr_reader.getChannel(i), 10,
+                         satdump::ChannelTransform().init_affine(1, 1, msumr::get_x_offset(msumr_serial_number, i).first, msumr::get_x_offset(msumr_serial_number, i).second)});
+                    msumr_products.set_channel_wavenumber(i, msu_cfg["wavenumbers"][i].get<double>());
+                }
 
                 nlohmann::json calib_cfg;
-                calib_cfg["calibrator"] = "meteor_msumr";
                 calib_cfg["vars"]["lrpt"] = false;
                 calib_cfg["vars"]["views"] = msumr_reader.calibration_info;
                 calib_cfg["vars"]["temps"] = msu_mr_telemetry_calib;
 
-                msumr_products.set_calibration(calib_cfg);
-                msumr_products.set_calibration_type(0, satdump::ImageProducts::CALIB_REFLECTANCE);
-                msumr_products.set_calibration_type(1, satdump::ImageProducts::CALIB_REFLECTANCE);
-                msumr_products.set_calibration_type(2, satdump::ImageProducts::CALIB_REFLECTANCE);
-                msumr_products.set_calibration_type(3, satdump::ImageProducts::CALIB_RADIANCE);
-                msumr_products.set_calibration_type(4, satdump::ImageProducts::CALIB_RADIANCE);
-                msumr_products.set_calibration_type(5, satdump::ImageProducts::CALIB_RADIANCE);
+                if (msu_cfg["vis"].contains(sat_name))
+                    calib_cfg["vars"]["vis"] = msu_cfg["vis"][sat_name];
+                else
+                    logger->warn("No visible calibration coefficients for this satellite yet!");
 
-                msumr_products.set_wavenumber(0, 0);
-                msumr_products.set_wavenumber(1, 0);
-                msumr_products.set_wavenumber(2, 0);
-                msumr_products.set_wavenumber(3, 2695.9743);
-                msumr_products.set_wavenumber(4, 925.4075);
-                msumr_products.set_wavenumber(5, 839.8979);
-
-                msumr_products.set_calibration_default_radiance_range(0, 0, 1);
-                msumr_products.set_calibration_default_radiance_range(1, 0, 1);
-                msumr_products.set_calibration_default_radiance_range(2, 0, 1);
-                msumr_products.set_calibration_default_radiance_range(3, 0.05, 1);
-                msumr_products.set_calibration_default_radiance_range(4, 30, 120);
-                msumr_products.set_calibration_default_radiance_range(5, 30, 120);
+                msumr_products.set_calibration("meteor_msumr", calib_cfg);
+                msumr_products.set_channel_unit(0, CALIBRATION_ID_REFLECTIVE_RADIANCE);
+                msumr_products.set_channel_unit(1, CALIBRATION_ID_REFLECTIVE_RADIANCE);
+                msumr_products.set_channel_unit(2, CALIBRATION_ID_REFLECTIVE_RADIANCE);
+                msumr_products.set_channel_unit(3, CALIBRATION_ID_EMISSIVE_RADIANCE);
+                msumr_products.set_channel_unit(4, CALIBRATION_ID_EMISSIVE_RADIANCE);
+                msumr_products.set_channel_unit(5, CALIBRATION_ID_EMISSIVE_RADIANCE);
 
                 saveJsonFile(directory + "/telemetry.json", msu_mr_telemetry);
                 msumr_products.save(directory);
@@ -263,9 +273,7 @@ namespace meteor
 
             // MTVZA
             {
-                auto &mreader = mtvza_reader2.lines > mtvza_reader.lines
-                                    ? mtvza_reader2
-                                    : mtvza_reader;
+                auto &mreader = mtvza_reader2.lines > mtvza_reader.lines ? mtvza_reader2 : mtvza_reader;
 
                 mtvza_status = SAVING;
                 std::string directory = d_output_file_hint.substr(0, d_output_file_hint.rfind('/')) + "/MTVZA";
@@ -276,22 +284,19 @@ namespace meteor
                 logger->info("----------- MTVZA");
                 logger->info("Lines : " + std::to_string(mreader.lines));
 
-                satdump::ImageProducts mtvza_products;
+                satdump::products::ImageProduct mtvza_products;
                 mtvza_products.instrument_name = "mtvza";
-                mtvza_products.has_timestamps = true;
-                mtvza_products.timestamp_type = satdump::ImageProducts::TIMESTAMP_LINE;
-                mtvza_products.set_tle(satdump::general_tle_registry->get_from_norad_time(norad, dataset.timestamp));
-                mtvza_products.set_timestamps(mreader.timestamps);
+                auto tle = satdump::db_tle->get_from_norad_time(norad, dataset.timestamp);
 
                 if (msumr_serial_number == 2)
-                    mtvza_products.set_proj_cfg(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-2_mtvza.json")));
+                    mtvza_products.set_proj_cfg_tle_timestamps(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-2_mtvza.json")), tle, mreader.timestamps);
                 else if (msumr_serial_number == 3)
-                    mtvza_products.set_proj_cfg(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-3_mtvza.json")));
+                    mtvza_products.set_proj_cfg_tle_timestamps(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-3_mtvza.json")), tle, mreader.timestamps);
                 else if (msumr_serial_number == 4)
-                    mtvza_products.set_proj_cfg(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-4_mtvza.json")));
+                    mtvza_products.set_proj_cfg_tle_timestamps(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-4_mtvza.json")), tle, mreader.timestamps);
 
                 for (int i = 0; i < 30; i++)
-                    mtvza_products.images.push_back({"MTVZA-" + std::to_string(i + 1), std::to_string(i + 1), mreader.getChannel(i)});
+                    mtvza_products.images.push_back({i, "MTVZA-" + std::to_string(i + 1), std::to_string(i + 1), mreader.getChannel(i)});
 
                 mtvza_products.save(directory);
                 dataset.products_list.push_back("MTVZA");
@@ -345,10 +350,7 @@ namespace meteor
                 ImGui::TableSetColumnIndex(0);
                 ImGui::Text("MTVZA");
                 ImGui::TableSetColumnIndex(1);
-                ImGui::TextColored(style::theme.green, "%d",
-                                   mtvza_reader2.lines > mtvza_reader.lines
-                                       ? mtvza_reader2.lines
-                                       : mtvza_reader.lines);
+                ImGui::TextColored(style::theme.green, "%d", mtvza_reader2.lines > mtvza_reader.lines ? mtvza_reader2.lines : mtvza_reader.lines);
                 ImGui::TableSetColumnIndex(2);
                 drawStatus(mtvza_status);
 
@@ -368,19 +370,11 @@ namespace meteor
             ImGui::End();
         }
 
-        std::string MeteorInstrumentsDecoderModule::getID()
-        {
-            return "meteor_instruments";
-        }
-
-        std::vector<std::string> MeteorInstrumentsDecoderModule::getParameters()
-        {
-            return {};
-        }
+        std::string MeteorInstrumentsDecoderModule::getID() { return "meteor_instruments"; }
 
         std::shared_ptr<ProcessingModule> MeteorInstrumentsDecoderModule::getInstance(std::string input_file, std::string output_file_hint, nlohmann::json parameters)
         {
             return std::make_shared<MeteorInstrumentsDecoderModule>(input_file, output_file_hint, parameters);
         }
-    } // namespace amsu
-} // namespace metop
+    } // namespace instruments
+} // namespace meteor

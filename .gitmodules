@@ -1,3 +1,6 @@
 [submodule "android/deps"]
 	path = android/deps
 	url = https://github.com/SatDump/Android-Dependencies
+[submodule "docs/res"]
+	path = docs/res
+	url = https://git.satdump.org/SatDump/Resources.git

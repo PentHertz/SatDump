@@ -1,17 +1,18 @@
-
-#include "logger.h"
-#include "products/image_products.h"
+int main(int /*argc*/, char *argv[]) {}
+#if 0
+#include "common/geodetic/vincentys_calculations.h"
+#include "image/io.h"
 #include "common/map/map_drawer.h"
-#include "resources.h"
-#include "nlohmann/json_utils.h"
-#include "core/config.h"
-#include "common/projection/warp/warp.h"
 #include "common/projection/gcp_compute/gcp_compute.h"
 #include "common/projection/projs/equirectangular.h"
+#include "common/projection/warp/warp.h"
 #include "common/utils.h"
+#include "core/config.h"
 #include "init.h"
-#include "common/geodetic/vincentys_calculations.h"
-#include "common/image/io.h"
+#include "logger.h"
+#include "nlohmann/json_utils.h"
+#include "products/image_products.h"
+#include "core/resources.h"
 
 #include "common/projection/warp/warp_bkd.h"
 
@@ -50,7 +51,7 @@ int main(int /*argc*/, char *argv[])
 
     // We don't wanna spam with init this time around
     logger->set_level(slog::LOG_OFF);
-    satdump::initSatdump();
+    satdump::initSatDump();
     completeLoggerInit();
     logger->set_level(slog::LOG_TRACE);
 
@@ -60,9 +61,9 @@ int main(int /*argc*/, char *argv[])
     printf("\n%s\n", img_pro.contents.dump(4).c_str());
 
     satdump::ImageCompositeCfg rgb_cfg;
-    rgb_cfg.equation = "ch3,ch2,ch1"; //"(ch7421+ch7422+ch7423+ch7242)/4";
-    //    rgb_cfg.equation = "1-ch37";
-    // rgb_cfg.equation = "1-ch33,1-ch34,1-ch35"; //"(ch3 * 0.4 + ch2 * 0.6) * 2.2 - 0.15, ch2 * 2.2 - 0.15, ch1 * 2.2 - 0.15";
+    rgb_cfg.expression = "ch3,ch2,ch1"; //"(ch7421+ch7422+ch7423+ch7242)/4";
+    //    rgb_cfg.expression = "1-ch37";
+    // rgb_cfg.expression = "1-ch33,1-ch34,1-ch35"; //"(ch3 * 0.4 + ch2 * 0.6) * 2.2 - 0.15, ch2 * 2.2 - 0.15, ch1 * 2.2 - 0.15";
     rgb_cfg.equalize = true;
     // rgb_cfg.white_balance = true;
     // rgb_cfg.normalize = true;
@@ -147,4 +148,7 @@ int main(int /*argc*/, char *argv[])
 #endif
 
     image::save_img(warp_result.output_image, "test");
+
+    satdump::exitSatDump();
 }
+#endif // TODOREWORK

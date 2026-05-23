@@ -1,52 +1,46 @@
 #pragma once
 
-#include "app.h"
+#include "handlers/handler.h"
 #include "imgui/imgui.h"
-#include "imgui/imgui_internal.h"
-#include <thread>
 #include <vector>
-
-#include "imgui/pfd/widget.h"
 
 #include "bit_container.h"
 
-#include "libs/ctpl/ctpl_stl.h"
-
-#include "tool.h"
+#include "utils/task_queue.h"
 
 namespace satdump
 {
-    class BitViewApplication : public Application
+    class BitViewTool;
+
+    class BitViewHandler : public handlers::Handler
     {
     protected:
-        float panel_ratio = 0.23;
-        float last_width = -1.0f;
-
         bool is_busy = false;
+        bool reset_view = true;
 
-        void drawUI();
-        void drawPanel();
-        void drawContents();
+        void drawMenu();
+        void drawContents(ImVec2 win_size);
+        void drawMenuBar();
+        void drawContextMenu();
 
     private:
-        FileSelectWidget select_bitfile_dialog = FileSelectWidget("File", "Select File", false, true);
+        bool custom_bit_depth = false;
+        std::string frame_width_exp;
 
-        std::shared_ptr<BitContainer> current_bit_container;
-        std::vector<std::shared_ptr<BitContainer>> all_bit_containers;
+        std::shared_ptr<BitContainer> bc;
 
     private:
         float process_progress = 0;
-        ctpl::thread_pool process_threadp = ctpl::thread_pool(4);
+        TaskQueue process_task;
 
         std::vector<std::shared_ptr<BitViewTool>> all_tools;
 
     public:
-        BitViewApplication();
-        ~BitViewApplication();
+        BitViewHandler(std::shared_ptr<BitContainer> c);
+        ~BitViewHandler();
 
     public:
-        static std::string getID() { return "bitview"; }
-        std::string get_name() { return "BitView"; }
-        static std::shared_ptr<Application> getInstance() { return std::make_shared<BitViewApplication>(); }
+        std::string getID() { return "bitview_handler"; }
+        std::string getName() { return bc->getName(); }
     };
-};
+}; // namespace satdump

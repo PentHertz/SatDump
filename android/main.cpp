@@ -1,11 +1,12 @@
-#include <unistd.h>
-#include <android/log.h>
-#include <android/asset_manager.h>
 #include "backend.h"
-#include "main_ui.h"
-#include "logger.h"
+#include "core/config.h"
 #include "init.h"
 #include "loader/loader.h"
+#include "logger.h"
+#include "main_ui.h"
+#include <android/asset_manager.h>
+#include <android/log.h>
+#include <unistd.h>
 
 // Data
 EGLDisplay g_EglDisplay = EGL_NO_DISPLAY;
@@ -99,18 +100,15 @@ void init(struct android_app *app)
         logger->add_sink(loading_screen_sink);
 
         satdump::tle_do_update_on_init = false;
-        satdump::initSatdump();
+        satdump::initSatDump();
         satdump::initMainUI();
 
-        //Shut down loading screen
+        // Shut down loading screen
         logger->del_sink(loading_screen_sink);
         loading_screen_sink.reset();
 
-        //Set font again to adjust for DPI
+        // Set font again to adjust for DPI
         eglSwapInterval(g_EglDisplay, 1);
-
-        // TLE
-        satdump::ui_thread_pool.push([&](int) { satdump::autoUpdateTLE(satdump::user_path + "/satdump_tles.txt"); });
 
         was_init = true;
     }
@@ -122,7 +120,7 @@ void init(struct android_app *app)
 
 void tick()
 {
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
     if (g_EglDisplay == EGL_NO_DISPLAY)
         return;
 
@@ -185,17 +183,14 @@ static void handleAppCmd(struct android_app *app, int32_t appCmd)
         shutdown();
         break;
     case APP_CMD_SAVE_STATE:
-        satdump::recorder_app->save_settings();
-        satdump::viewer_app->save_settings();
-        satdump::config::saveUserConfig();
+        // satdump::recorder_app->save_settings(); // TODOREWORK!!!!
+        // satdump::explorer_app->save_settings(); // TODOREWORK!!!!
+        satdump::satdump_cfg.saveUser();
         break;
     }
 }
 
-static int32_t handleInputEvent(struct android_app *app, AInputEvent *inputEvent)
-{
-    return ImGui_ImplAndroid_HandleInputEvent(inputEvent);
-}
+static int32_t handleInputEvent(struct android_app *app, AInputEvent *inputEvent) { return ImGui_ImplAndroid_HandleInputEvent(inputEvent); }
 
 std::string getAppFilesDir(struct android_app *app)
 {
@@ -305,6 +300,8 @@ void android_main(struct android_app *app)
         // Initiate a new frame
         tick();
     }
+
+    satdump::exitSatDump();
 }
 
 // Unfortunately, there is no way to show the on-screen input from native code.

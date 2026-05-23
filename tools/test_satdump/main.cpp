@@ -1,9 +1,10 @@
-#include <fstream>
+#include "logger.h"
 #include "nlohmann/json.hpp"
 #include "nlohmann/json_utils.h"
-#include "logger.h"
-#include <fstream>
+#include "pipeline/pipeline.h"
+#include "utils/string.h"
 #include <filesystem>
+#include <fstream>
 
 #include "init.h"
 
@@ -30,12 +31,7 @@ nlohmann::ordered_json run_standalone_tests_offline(nlohmann::ordered_json confi
         if (!std::filesystem::exists(output_path))
             std::filesystem::create_directories(output_path);
 
-        std::string command = excutable + " " +
-                              pipeline + " " +
-                              input_level + " \"" +
-                              input_path + "\" \"" +
-                              output_path + "\" " +
-                              parameters;
+        std::string command = excutable + " " + pipeline + " " + input_level + " \"" + input_path + "\" \"" + output_path + "\" " + parameters;
 
         if (catch_logs)
             command += " > \"" + output_path + "/logs.txt\"";
@@ -60,10 +56,7 @@ nlohmann::ordered_json run_standalone_tests_offline(nlohmann::ordered_json confi
     return report;
 }
 
-#include "core/pipeline.h"
 #include "common/cli_utils.h"
-
-#include "common/utils.h"
 
 nlohmann::ordered_json run_singleinstance_tests_offline(nlohmann::ordered_json config, std::string input_path1, std::string output_path1)
 {
@@ -93,9 +86,9 @@ nlohmann::ordered_json run_singleinstance_tests_offline(nlohmann::ordered_json c
         // int return_value = system(command.c_str());
 
         {
-            std::optional<satdump::Pipeline> pipeliner = satdump::getPipelineFromName(pipeline);
+            std::optional<satdump::pipeline::Pipeline> pipeliner = satdump::pipeline::getPipelineFromID(pipeline);
 
-            std::vector<std::string> split_str = splitString(parameters, ' ');
+            std::vector<std::string> split_str = satdump::splitString(parameters, ' ');
             std::vector<char *> v;
             for (std::string str : split_str)
             {
@@ -144,7 +137,7 @@ int main(int argc, char *argv[])
         final_report["standalone_offline"] = run_standalone_tests_offline(config, input_folder, output_folder + "/standalone_offline");
 
     initLogger();
-    satdump::initSatdump();
+    satdump::initSatDump();
     completeLoggerInit();
 
     // Single-Instance tests
@@ -154,4 +147,6 @@ int main(int argc, char *argv[])
     std::ofstream output_file(std::string(argv[3]) + "/tests_results.json");
     output_file << final_report.dump(4);
     output_file.close();
+
+    satdump::exitSatDump();
 }

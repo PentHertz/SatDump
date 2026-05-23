@@ -83,6 +83,12 @@ if(PLUGIN_GK2A OR PLUGINS_ALL)
   add_subdirectory(gk2a_support)
 endif()
 
+option(PLUGIN_XRIT "Enable the Generic XRIT support plugin" OFF)
+
+if(PLUGIN_XRIT OR PLUGINS_ALL)
+  add_subdirectory(xrit_support)
+endif()
+
 option(
   PLUGIN_NOAA_METOP
   "Enable the NOAA/MetOp POES (AHRPT, HRPT, X-Band dumps, GAC, etc) support plugin"
@@ -90,6 +96,12 @@ option(
 
 if(PLUGIN_NOAA_METOP OR PLUGINS_ALL)
   add_subdirectory(noaa_metop_support)
+endif()
+
+option(PLUGIN_METOPSG "Enable the MetOp-SG support plugin" OFF)
+
+if(PLUGIN_METOPSG OR PLUGINS_ALL)
+  add_subdirectory(metopsg_support)
 endif()
 
 option(PLUGIN_DMSP "Enable the DMSP support plugin" OFF)
@@ -164,6 +176,12 @@ if(PLUGIN_BLUEWALKER3 OR PLUGINS_ALL)
   add_subdirectory(bluewalker3_support)
 endif()
 
+option(PLUGIN_UVSQ "Enable the UVSQ support plugin" OFF)
+
+if(PLUGIN_UVSQ OR PLUGINS_ALL)
+  add_subdirectory(uvsq_support)
+endif()
+
 option(PLUGIN_ANALOG
        "Enable the support plugin for analog protocols such as NOAA APT" OFF)
 
@@ -221,19 +239,22 @@ if(PLUGIN_CUBESAT OR PLUGINS_ALL)
   add_subdirectory(cubesat_support)
 endif()
 
-option(PLUGIN_OTHERS "Enable the support plugin for a few other random satellites" OFF)
+option(PLUGIN_OTHERS
+       "Enable the support plugin for a few other random satellites" OFF)
 
 if(PLUGIN_OTHERS OR PLUGINS_ALL)
   add_subdirectory(others_support)
 endif()
 
-option(PLUGIN_OFFICIAL_PRODUCTS "Enable the support plugin for official satellite products" OFF)
+option(PLUGIN_FIRSTPARTY_SUPPORT
+       "Enable the support plugin for first-party satellite products" OFF)
 
-if(PLUGIN_OFFICIAL_PRODUCTS OR PLUGINS_ALL)
-  add_subdirectory(official_products_support)
+if(PLUGIN_FIRSTPARTY_SUPPORT OR PLUGINS_ALL)
+  add_subdirectory(firstparty_support)
 endif()
 
-option(PLUGIN_DVB "Enable the support plugin for DVB Standards (DVB-S, DVB-S2)" OFF)
+option(PLUGIN_DVB "Enable the support plugin for DVB Standards (DVB-S, DVB-S2)"
+       OFF)
 
 if(PLUGIN_DVB OR PLUGINS_ALL)
   add_subdirectory(dvb_support)
@@ -257,13 +278,23 @@ if(PLUGIN_EARTHCARE OR PLUGINS_ALL)
   add_subdirectory(earthcare_support)
 endif()
 
-# add_subdirectory(sample)
-option(PLUGIN_GVAR_EXTENDED "Enable the GVAR Extended plugin" OFF)
+option(PLUGIN_SEAWIFS "Enable the SeaWIFs support plugin" OFF)
 
-if(PLUGIN_GVAR_EXTENDED)
-  add_subdirectory(gvar_extended)
+if(PLUGIN_SEAWIFS OR PLUGINS_ALL)
+  add_subdirectory(seawifs_support)
 endif()
 
+option(PLUGIN_KANOPUS "Enable the Kanopus support plugin" OFF)
+
+if(PLUGIN_KANOPUS OR PLUGINS_ALL)
+  add_subdirectory(kanopus_support)
+endif()
+
+option(PLUGIN_OMINOUS "Enable the Ominous support plugin" OFF)
+
+if(PLUGIN_OMINOUS)
+  add_subdirectory(ominous_support)
+endif()
 # ##############################################################################
 option(PLUGIN_SIMD_SSE41 "Enable SIMD SSE41 plugin" ON)
 
@@ -332,6 +363,12 @@ if(PLUGIN_BLADERF_SDR_SUPPORT)
   add_subdirectory(sdr_sources/bladerf_sdr_support)
 endif()
 
+option(PLUGIN_LITEXM2SDR_SDR_SUPPORT "Enable LiteX M2SDR SDR Support plugin" ON)
+
+if(PLUGIN_LITEXM2SDR_SDR_SUPPORT)
+  add_subdirectory(sdr_sources/litexm2sdr_sdr_support)
+endif()
+
 option(PLUGIN_USRP_SDR_SUPPORT "Enable USRP SDR Support plugin" ON)
 
 if(PLUGIN_USRP_SDR_SUPPORT)
@@ -368,7 +405,7 @@ if(PLUGIN_SDRPP_SERVER_SUPPORT)
   add_subdirectory(sdr_sources/sdrpp_server_support)
 endif()
 
-option(PLUGIN_AARONIA_SDR_SUPPORT "Enable Aaronia Spectran Support plugin" OFF)
+option(PLUGIN_AARONIA_SDR_SUPPORT "Enable Aaronia Spectran Support plugin" ON)
 
 if(PLUGIN_AARONIA_SDR_SUPPORT)
   add_subdirectory(sdr_sources/aaronia_sdr_support)
@@ -452,16 +489,42 @@ if(PLUGIN_BOCHUM_SUPPORT)
   add_subdirectory(bochum_support)
 endif()
 
-# ##############################################################################
-option(PLUGIN_STANDARD_CPP_COMPOS "Enable Standard C++ Composites plugin" OFF)
+option(PLUGIN_EXPERIMENTAL_DEVICES_SUPPORT "Enable Experimental Devices support (SatDump DC and more later)" ON)
 
-if(PLUGIN_STANDARD_CPP_COMPOS OR PLUGINS_ALL)
-  add_subdirectory(standard_cpp_compos_support)
+if(PLUGIN_EXPERIMENTAL_DEVICES_SUPPORT)
+  add_subdirectory(experimental_devices_support)
 endif()
 
 # ##############################################################################
 option(PLUGIN_BITVIEW_APP "Enable BitView Application (Very WIP)" OFF)
 
-if(PLUGIN_BITVIEW_APP)
+if(PLUGIN_BITVIEW_APP OR PLUGINS_ALL)
   add_subdirectory(bitview_app)
 endif()
+
+option(PLUGIN_TOOLS_APP "Enable Tools Applications (Very WIP)" ON)
+
+if(PLUGIN_TOOLS_APP)
+  add_subdirectory(tools_app)
+endif()
+
+option(PLUGIN_WIPTRACKING_APP "Enable WIP Tracking Application" OFF)
+
+if(PLUGIN_WIPTRACKING_APP)
+  add_subdirectory(wip_tracking_app)
+endif()
+
+option(PLUGIN_WIPSETTINGS_EDITOR_APP "Enable WIP Settings Editor Application"
+       ON)
+
+if(PLUGIN_WIPSETTINGS_EDITOR_APP)
+  add_subdirectory(wip_settings_editor_app)
+endif()
+
+option(PLUGIN_WEBHOOK_APP "Enable Webhook Application" ON)
+
+if(BUILD_GUI AND PLUGIN_WEBHOOK_APP)
+  add_subdirectory(webhook_app)
+endif()
+
+

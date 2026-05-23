@@ -1,7 +1,6 @@
 #pragma once
 
-#include "bit_container.h"
-#include "libs/ctpl/ctpl_stl.h"
+#include "bitview.h"
 
 namespace satdump
 {

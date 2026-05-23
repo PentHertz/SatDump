@@ -3,10 +3,12 @@
 #include "dcs_decoder.h"
 #include "core/config.h"
 #include "common/utils.h"
-#include "common/lrit/crc_table.h"
+#include "core/plugin.h"
+#include "utils/http.h"
+#include "xrit/transport/crc_table.h"
 #include "nlohmann/json_utils.h"
 #include "logger.h"
-#include "resources.h"
+#include "core/resources.h"
 #include "init.h"
 
 #include "../module_goes_lrit_data_decoder.h"
@@ -39,10 +41,10 @@ namespace goes
             std::string file_data;
 
             logger->info("Updating PDTs and HADS data for DCS processing...");
-            std::vector<std::string> pdt_urls = satdump::config::main_cfg["plugin_settings"]["goes_support"]["pdt_urls"];
+            std::vector<std::string> pdt_urls = satdump::satdump_cfg.main_cfg["plugin_settings"]["goes_support"]["pdt_urls"];
             for (std::string& pdt_url : pdt_urls)
             {
-                if (perform_http_request(pdt_url, file_data) == 0)
+                if (satdump::perform_http_request(pdt_url, file_data) == 0)
                 {
                     std::ofstream save_pdts(satdump::user_path + "/PDTS_COMPRESSED.txt");
                     save_pdts << file_data;
@@ -60,10 +62,10 @@ namespace goes
 
             this_success = false;
             file_data = "";
-            std::vector<std::string> hads_urls = satdump::config::main_cfg["plugin_settings"]["goes_support"]["hads_urls"];
+            std::vector<std::string> hads_urls = satdump::satdump_cfg.main_cfg["plugin_settings"]["goes_support"]["hads_urls"];
             for (std::string& hads_url : hads_urls)
             {
-                if (perform_http_request(hads_url, file_data) == 0)
+                if (satdump::perform_http_request(hads_url, file_data) == 0)
                 {
                     std::ofstream save_hads(satdump::user_path + "/all_dcp_defs.txt");
                     save_hads << file_data;
@@ -81,8 +83,8 @@ namespace goes
 
             if (update_success)
             {
-                satdump::config::main_cfg["plugin_settings"]["goes_support"]["last_pdt_update"] = time(NULL);
-                satdump::config::saveUserConfig();
+                satdump::satdump_cfg.main_cfg["plugin_settings"]["goes_support"]["last_pdt_update"] = time(NULL);
+                satdump::satdump_cfg.saveUser();
 
                 dcp_mtx.lock();
                 dcp_list.clear();
@@ -100,10 +102,10 @@ namespace goes
                 shef_codes = loadJsonFile(resources::getResourcePath("dcs/shef_codes.json"));
 
             loadDCPs();
-            if (satdump::config::main_cfg["plugin_settings"]["goes_support"]["update_interval"] != -1)
+            if (satdump::satdump_cfg.main_cfg["plugin_settings"]["goes_support"]["update_interval"] != -1)
                 satdump::taskScheduler->add_task("goes_dcp_updater", std::make_shared<DCPUpdateEvent>(),
-                    satdump::config::main_cfg["plugin_settings"]["goes_support"]["last_pdt_update"].get<time_t>(),
-                    satdump::config::main_cfg["plugin_settings"]["goes_support"]["update_interval"].get<time_t>());
+                    satdump::satdump_cfg.main_cfg["plugin_settings"]["goes_support"]["last_pdt_update"].get<time_t>(),
+                    satdump::satdump_cfg.main_cfg["plugin_settings"]["goes_support"]["update_interval"].get<time_t>());
         }
 
         void GOESLRITDataDecoderModule::loadDCPs()
@@ -409,7 +411,7 @@ namespace goes
 
                 // Calculate Block CRC
                 for (uint16_t i = 0; i < block_length - 2; i++)
-                    block_crc = (block_crc << 8) ^ lrit::crc_table[(block_crc >> 8) ^ (uint16_t)block_ptr[i]];
+                    block_crc = (block_crc << 8) ^ satdump::xrit::crc_table[(block_crc >> 8) ^ (uint16_t)block_ptr[i]];
                 bool message_crc_pass = (uint16_t)(block_ptr[block_length - 1] << 8 | block_ptr[block_length - 2]) == block_crc;
 
                 // DCP Message Processing

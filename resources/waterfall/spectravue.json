@@ -1,0 +1,13 @@
+{
+    "name": "SpectraVue",
+    "author": "lego11",
+    "map": [
+        "#000000",
+        "#0000FF",
+        "#00FFFF",
+        "#00FF00",
+        "#FFFF00",
+        "#FF0000",
+        "#FF00FF"
+    ]
+}

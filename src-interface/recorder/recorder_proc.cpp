@@ -1,11 +1,15 @@
+#include "handlers/processing/processing.h"
+#include "init.h"
 #include "recorder.h"
 
-#include "main_ui.h"
 #include "logger.h"
-#include "processing.h"
+#include "main_ui.h"
+#include "utils/time.h"
 
 #ifndef _MSC_VER
 #include <sys/statvfs.h>
+#else
+#include <Windows.h>
 #endif
 
 namespace satdump
@@ -122,22 +126,24 @@ namespace satdump
             decim_ptr->stop();
         source_ptr->stop();
         is_started = false;
-        config::main_cfg["user"]["recorder_sdr_settings"]["last_used_sdr"] = sources[sdr_select_id].name;
-        config::main_cfg["user"]["recorder_sdr_settings"][sources[sdr_select_id].name] = source_ptr->get_settings();
-        config::main_cfg["user"]["recorder_sdr_settings"][sources[sdr_select_id].name]["samplerate"] = source_ptr->get_samplerate();
-        config::main_cfg["user"]["recorder_sdr_settings"][sources[sdr_select_id].name]["frequency"] = frequency_hz;
-        config::main_cfg["user"]["recorder_sdr_settings"][sources[sdr_select_id].name]["xconverter_frequency"] = xconverter_frequency;
-        config::main_cfg["user"]["recorder_sdr_settings"][sources[sdr_select_id].name]["decimation"] = current_decimation;
-        config::saveUserConfig();
+        nlohmann::json rec_cfg;
+        rec_cfg["last_used_sdr"] = sources[sdr_select_id].name;
+        rec_cfg[sources[sdr_select_id].name] = source_ptr->get_settings();
+        rec_cfg[sources[sdr_select_id].name]["samplerate"] = source_ptr->get_samplerate();
+        rec_cfg[sources[sdr_select_id].name]["frequency"] = frequency_hz;
+        rec_cfg[sources[sdr_select_id].name]["xconverter_frequency"] = xconverter_frequency;
+        rec_cfg[sources[sdr_select_id].name]["decimation"] = current_decimation;
+        db->set_user_json("recorder_sdr_settings", rec_cfg);
     }
 
     void RecorderApplication::try_load_sdr_settings()
     {
-        if (config::main_cfg["user"].contains("recorder_sdr_settings"))
+        auto dcfg = db->get_user_json("recorder_sdr_settings");
+        if (!dcfg.is_null())
         {
-            if (config::main_cfg["user"]["recorder_sdr_settings"].contains(sources[sdr_select_id].name))
+            if (dcfg.contains(sources[sdr_select_id].name))
             {
-                auto &cfg = config::main_cfg["user"]["recorder_sdr_settings"][sources[sdr_select_id].name];
+                auto &cfg = dcfg[sources[sdr_select_id].name];
                 source_ptr->set_settings(cfg);
                 if (cfg.contains("samplerate"))
                 {
@@ -180,11 +186,11 @@ namespace satdump
             try
             {
                 if (automated_live_output_dir)
-                    pipeline_output_dir = prepareAutomatedPipelineFolder(time(0), source_ptr->d_frequency, pipeline_selector.selected_pipeline.name);
+                    pipeline_output_dir = prepareAutomatedPipelineFolder(time(0), source_ptr->d_frequency, pipeline_selector.selected_pipeline.id);
                 else
                     pipeline_output_dir = pipeline_selector.outputdirselect.getPath();
 
-                live_pipeline = std::make_unique<LivePipeline>(pipeline_selector.selected_pipeline, pipeline_params, pipeline_output_dir);
+                live_pipeline = std::make_unique<pipeline::LivePipeline>(pipeline_selector.selected_pipeline, pipeline_params, pipeline_output_dir);
                 splitter->reset_output("live");
                 live_pipeline->start(splitter->get_output("live"), ui_thread_pool);
                 splitter->set_enabled("live", true);
@@ -213,14 +219,15 @@ namespace satdump
             live_pipeline->stop();
             is_stopping_processing = is_processing = false;
 
-            if (config::main_cfg["user_interface"]["finish_processing_after_live"]["value"].get<bool>() && live_pipeline->getOutputFiles().size() > 0)
+            if (satdump_cfg.main_cfg["user_interface"]["finish_processing_after_live"]["value"].get<bool>() && live_pipeline->getOutputFile().size() > 0)
             {
-                Pipeline pipeline = pipeline_selector.selected_pipeline;
-                std::string input_file = live_pipeline->getOutputFiles()[0];
-                int start_level = pipeline.live_cfg.normal_live[pipeline.live_cfg.normal_live.size() - 1].first;
-                std::string input_level = pipeline.steps[start_level].level_name;
-                ui_thread_pool.push([=](int)
-                                    { processing::process(pipeline, input_level, input_file, pipeline_output_dir, pipeline_params); });
+                pipeline::Pipeline pipeline = pipeline_selector.selected_pipeline;
+                std::string input_file = live_pipeline->getOutputFile();
+                logger->critical(input_file);
+                int start_level = pipeline.live_cfg.normal_live[pipeline.live_cfg.normal_live.size() - 1];
+                std::string input_level = pipeline.steps[start_level].level;
+                eventBus->fire_event<explorer::ExplorerAddHandlerEvent>(
+                    {std::make_shared<handlers::OffProcessingHandler>(pipeline, input_level, input_file, pipeline_output_dir, pipeline_params), false, true});
             }
 
             live_pipeline.reset();
@@ -251,7 +258,7 @@ namespace satdump
 
     void RecorderApplication::load_rec_path_data()
     {
-        recording_path = config::main_cfg["satdump_directories"]["recording_path"]["value"].get<std::string>();
+        recording_path = satdump_cfg.main_cfg["satdump_directories"]["recording_path"]["value"].get<std::string>();
 #if defined(_MSC_VER)
         recording_path += "\\";
 #elif defined(__ANDROID__)
@@ -262,10 +269,16 @@ namespace satdump
         recording_path += "/";
 #endif
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER)
         ULARGE_INTEGER bytes_available;
         if (GetDiskFreeSpaceEx(recording_path.c_str(), &bytes_available, NULL, NULL))
             disk_available = bytes_available.QuadPart;
+
+#elif defined(__APPLE__)
+        struct statvfs stat_buffer;
+        if (statvfs(recording_path.c_str(), &stat_buffer) == 0)
+            // MacOS needs different handling because bsize reports a policy-adjusted value which is bogus
+            disk_available = stat_buffer.f_bavail * stat_buffer.f_frsize;
 #else
         struct statvfs stat_buffer;
         if (statvfs(recording_path.c_str(), &stat_buffer) == 0)
@@ -302,7 +315,7 @@ namespace satdump
                         {
                             std::string id = std::to_string(obj.norad) + "_" + std::to_string(dl.frequency) + "_live";
                             std::string name = std::to_string(obj.norad);
-                            std::optional<TLE> this_tle = satdump::general_tle_registry->get_from_norad(obj.norad);
+                            std::optional<TLE> this_tle = satdump::db_tle->get_from_norad(obj.norad);
                             if (this_tle.has_value())
                                 name = this_tle->name;
                             name += " - " + format_notated(dl.frequency, "Hz");
@@ -313,7 +326,7 @@ namespace satdump
                         {
                             std::string id = std::to_string(obj.norad) + "_" + std::to_string(dl.frequency) + "_record";
                             std::string name = std::to_string(obj.norad);
-                            std::optional<TLE> this_tle = satdump::general_tle_registry->get_from_norad(obj.norad);
+                            std::optional<TLE> this_tle = satdump::db_tle->get_from_norad(obj.norad);
                             if (this_tle.has_value())
                                 name = this_tle->name;
                             name += " - " + format_notated(dl.frequency, "Hz");
@@ -346,7 +359,7 @@ namespace satdump
 
                     if (obj.downlinks[0].live)
                     {
-                        pipeline_selector.select_pipeline(obj.downlinks[0].pipeline_selector->selected_pipeline.name);
+                        pipeline_selector.select_pipeline(obj.downlinks[0].pipeline_selector->selected_pipeline.id);
                         pipeline_selector.setParameters(obj.downlinks[0].pipeline_selector->getParameters());
                         pipeline_selector.selected_pipeline.steps = obj.downlinks[0].pipeline_selector->selected_pipeline.steps;
                         start_processing();
@@ -395,4 +408,4 @@ namespace satdump
             };
         }
     }
-}
+} // namespace satdump

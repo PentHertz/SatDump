@@ -1,0 +1,29 @@
+{
+    "name": "CERES",
+    "presets": [
+        {
+            "name": "Longwave Radiation (Outgoing)",
+            "expression": "chl",
+            "image" : {
+                "individual_equalize": true,
+                "geo_correct": true
+            }
+        },
+        {
+            "name": "Shortwave Radiation (Incoming)",
+            "expression": "chs",
+            "image" : {
+                "individual_equalize": true,
+                "geo_correct": true
+            }
+        },
+        {
+            "name": "Total Radiation",
+            "expression": "cht",
+            "image" : {
+                "individual_equalize": true,
+                "geo_correct": true
+            }
+        }
+    ]
+}

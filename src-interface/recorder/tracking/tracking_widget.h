@@ -1,18 +1,19 @@
 #pragma once
 
-#include "libs/predict/predict.h"
 #include "common/geodetic/geodetic_coordinates.h"
-#include <vector>
+#include "init.h"
+#include "libs/predict/predict.h"
+#include "nlohmann/json.hpp"
+#include "nlohmann/json_utils.h"
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
-#include <memory>
-#include <functional>
-#include "core/config.h"
-#include "nlohmann/json_utils.h"
+#include <vector>
 
 #include "common/tracking/obj_tracker/object_tracker.h"
-#include "common/tracking/scheduler/scheduler.h"
 #include "common/tracking/sat_finder/sat_finder_ui.h"
+#include "common/tracking/scheduler/scheduler.h"
 #include "import_export.h"
 
 namespace satdump
@@ -48,27 +49,29 @@ namespace satdump
     private:
         void saveConfig()
         {
-            config::main_cfg["user"]["recorder_tracking"]["enabled_objects"] = auto_scheduler.getTracked();
-            config::main_cfg["user"]["recorder_tracking"]["rotator_algo"] = object_tracker.getRotatorConfig();
-            config::main_cfg["user"]["recorder_tracking"]["autotrack_cfg"] = auto_scheduler.getAutoTrackCfg();
+            nlohmann::ordered_json cfg;
+            cfg["enabled_objects"] = auto_scheduler.getTracked();
+            cfg["rotator_algo"] = object_tracker.getRotatorConfig();
+            cfg["autotrack_cfg"] = auto_scheduler.getAutoTrackCfg();
             if (rotator_handler)
-                config::main_cfg["user"]["recorder_tracking"]["rotator_config"][rotator_handler->get_id()] = rotator_handler->get_settings();
+                cfg["rotator_config"][rotator_handler->get_id()] = rotator_handler->get_settings();
 
-            config::saveUserConfig();
+            db->set_user_json("recorder_tracking", cfg);
         }
 
         void loadConfig()
         {
-            if (config::main_cfg["user"].contains("recorder_tracking"))
+            nlohmann::json cfg = db->get_user_json("recorder_tracking");
+            if (!cfg.is_null())
             {
-                auto enabled_satellites = getValueOrDefault(config::main_cfg["user"]["recorder_tracking"]["enabled_objects"], std::vector<TrackedObject>());
+                auto enabled_satellites = getValueOrDefault(cfg["enabled_objects"], std::vector<TrackedObject>());
                 nlohmann::json rotator_algo_cfg;
-                if (config::main_cfg["user"]["recorder_tracking"].contains("rotator_algo"))
-                    rotator_algo_cfg = config::main_cfg["user"]["recorder_tracking"]["rotator_algo"];
+                if (cfg.contains("rotator_algo"))
+                    rotator_algo_cfg = cfg["rotator_algo"];
 
                 auto_scheduler.setTracked(enabled_satellites);
                 object_tracker.setRotatorConfig(rotator_algo_cfg);
-                auto_scheduler.setAutoTrackCfg(getValueOrDefault<AutoTrackCfg>(config::main_cfg["user"]["recorder_tracking"]["autotrack_cfg"], AutoTrackCfg()));
+                auto_scheduler.setAutoTrackCfg(getValueOrDefault<AutoTrackCfg>(cfg["autotrack_cfg"], AutoTrackCfg()));
             }
         }
 
@@ -80,4 +83,4 @@ namespace satdump
         void renderConfig();
         void renderSatfinder();
     };
-}
+} // namespace satdump

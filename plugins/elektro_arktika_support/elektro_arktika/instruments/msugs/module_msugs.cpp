@@ -1,31 +1,46 @@
 #include "module_msugs.h"
-#include <fstream>
-#include "logger.h"
-#include <filesystem>
-#include "imgui/imgui.h"
-#include "common/utils.h"
 #include "common/simple_deframer.h"
-#include "common/image/io.h"
+#include "common/utils.h"
+#include "image/io.h"
+#include "imgui/imgui.h"
+#include "logger.h"
+#include "products/image/channel_transform.h"
+#include "utils/binary.h"
+#include "utils/stats.h"
+#include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+
+#include "products/dataset.h"
+#include "products/image_product.h"
+
+#include "common/tracking/tle.h"
+#include "core/resources.h"
+#include "nlohmann/json_utils.h"
 
 namespace elektro_arktika
 {
     namespace msugs
     {
-        MSUGSDecoderModule::MSUGSDecoderModule(std::string input_file, std::string output_file_hint, nlohmann::json parameters) : ProcessingModule(input_file, output_file_hint, parameters)
+        MSUGSDecoderModule::MSUGSDecoderModule(std::string input_file, std::string output_file_hint, nlohmann::json parameters)
+            : satdump::pipeline::base::FileStreamToFileStreamModule(input_file, output_file_hint, parameters)
         {
+            fsfsm_enable_output = false;
+            apply_correction = parameters.contains("apply_correction") ? parameters["apply_correction"].get<bool>() : false;
+
+            is_arktika = parameters.contains("is_arktika") ? parameters["is_arktika"].get<bool>() : false;
+            if (parameters.contains("satellite_number"))
+                sat_num = parameters["satellite_number"].is_string() ? std::stoi(parameters["satellite_number"].get<std::string>()) : parameters["satellite_number"].get<int>();
+            else
+                sat_num = 0;
         }
 
         void MSUGSDecoderModule::process()
         {
-            filesize = getFilesize(d_input_file);
-            data_in = std::ifstream(d_input_file, std::ios::binary);
 
             std::string directory = d_output_file_hint.substr(0, d_output_file_hint.rfind('/')) + "/MSU-GS";
 
-            logger->info("Using input frames " + d_input_file);
-            logger->info("Decoding to " + directory);
-
-            time_t lastTime = 0;
             uint8_t cadu[1024];
 
             def::SimpleDeframer deframerVIS1(0x0218a7a392dd9abf, 64, 121680, 10, true);
@@ -34,16 +49,16 @@ namespace elektro_arktika
             def::SimpleDeframer deframerIR(0x0218a7a392dd9abf, 64, 14560, 10, true);
             // def::SimpleDeframer deframerUnknown(0xa6007c, 24, 1680, 0, false);
 
-            // std::ofstream data_unknown(directory + "/data_unknown.bin", std::ios::binary);
+            std::ofstream data_unknown(directory + "/data_unknown.bin", std::ios::binary);
 
             logger->info("Demultiplexing and deframing...");
 
-            int offset = d_parameters["msugs_offset"].get<int>();
+            double last_val = 0;
 
-            while (!data_in.eof())
+            while (should_run())
             {
                 // Read buffer
-                data_in.read((char *)cadu, 1024);
+                read_data((uint8_t *)cadu, 1024);
 
                 int vcid = (cadu[5] >> 1) & 7;
                 int vcid_2 = (cadu[11] >> 1) & 7;
@@ -52,19 +67,36 @@ namespace elektro_arktika
                 {
                     std::vector<std::vector<uint8_t>> frames = deframerVIS1.work(&cadu[24], 1024 - 24);
                     for (std::vector<uint8_t> &frame : frames)
-                        vis1_reader.pushFrame(&frame[0], offset);
-                }
-                else if ((vcid == 3) || (vcid_2 == 3))
-                {
-                    std::vector<std::vector<uint8_t>> frames = deframerVIS2.work(&cadu[24], 1024 - 24);
-                    for (std::vector<uint8_t> &frame : frames)
-                        vis2_reader.pushFrame(&frame[0], offset);
+                    {
+                        vis1_reader.pushFrame(&frame[0], apply_correction);
+
+                        uint8_t vals[7];
+                        for (int i = 0; i < 7; i++)
+                            vals[6 - i] = satdump::reverseBits(frame[15200 + i]);
+                        for (int i = 0; i < 7; i++)
+                            frame[15200 + i] = vals[i];
+
+#if 0
+                        double val = (uint64_t)frame[15202] << 16 | (uint64_t)frame[15203] << 8 | (uint64_t)frame[15204];
+                        val = (val / 16777215.0) * 360;
+                        printf("%4.4f %4.4f\n", val, val - last_val);
+                        last_val = val;
+#endif
+
+                        data_unknown.write((char *)frame.data(), frame.size());
+                    }
                 }
                 else if ((vcid == 5) || (vcid_2 == 5))
                 {
+                    std::vector<std::vector<uint8_t>> frames = deframerVIS2.work(&cadu[24], 1024 - 24);
+                    for (std::vector<uint8_t> &frame : frames)
+                        vis2_reader.pushFrame(&frame[0], apply_correction);
+                }
+                else if ((vcid == 3) || (vcid_2 == 3))
+                {
                     std::vector<std::vector<uint8_t>> frames = deframerVIS3.work(&cadu[24], 1024 - 24);
                     for (std::vector<uint8_t> &frame : frames)
-                        vis3_reader.pushFrame(&frame[0], offset);
+                        vis3_reader.pushFrame(&frame[0], apply_correction);
                 }
                 else if ((vcid == 4) || (vcid_2 == 4))
                 {
@@ -86,18 +118,18 @@ namespace elektro_arktika
                             data_unknown.write((char *)frame.data(), frame.size());
                     }
                 }*/
-
-                progress = data_in.tellg();
-
-                if (time(NULL) % 10 == 0 && lastTime != time(NULL))
-                {
-                    lastTime = time(NULL);
-                    logger->info("Progress " + std::to_string(round(((double)data_in.tellg() / (double)filesize) * 1000.0) / 10.0) + "%%");
-                }
             }
 
             // data_unknown.close();
-            data_in.close();
+            cleanup();
+
+            // TODOREWORK satelliteID
+            std::string sat_name = "ELEKTRO-L";
+
+            // Products dataset
+            satdump::products::DataSet dataset;
+            dataset.satellite_name = sat_name;
+            dataset.timestamp = time(0); // satdump::get_median(vis1_reader.timestamps);
 
             logger->info("----------- MSU-GS");
             logger->info("MSU-GS CH1 Lines        : " + std::to_string(vis1_reader.frames));
@@ -110,69 +142,123 @@ namespace elektro_arktika
             if (!std::filesystem::exists(directory))
                 std::filesystem::create_directory(directory);
 
+            nlohmann::json sat_cfg;
+            if (is_arktika && resources::resourceExists("elektro/m" + std::to_string(sat_num) + "_cfg.json"))
+                sat_cfg = loadJsonFile(resources::getResourcePath("elektro/m" + std::to_string(sat_num) + "_cfg.json"));
+            else if (resources::resourceExists("elektro/l" + std::to_string(sat_num) + "_cfg.json"))
+                sat_cfg = loadJsonFile(resources::getResourcePath("elektro/l" + std::to_string(sat_num) + "_cfg.json"));
+            else
+                logger->error("No further MSU-GS processing will be performed for this ELEKTRO sat!");
+
+            // MSUVIS1 TODOREWORK
+            {
+                ////////////////////////////////////////// mtvza_status = SAVING;
+                std::string directory = d_output_file_hint.substr(0, d_output_file_hint.rfind('/')) + "/MSUGS_VIS1";
+
+                if (!std::filesystem::exists(directory))
+                    std::filesystem::create_directory(directory);
+
+                //   logger->info("----------- KMSS MSU-100 1");
+                //   logger->info("Lines : " + std::to_string(kmss_lines));
+
+                satdump::products::ImageProduct msuvis_product;
+                msuvis_product.instrument_name = "msugs_vis";
+                //                    msuvis_products.has_timestamps = true; // TODOREWORK
+                //                    msuvis_products.set_tle(satdump::general_tle_registry.get_from_norad(norad));
+                //                    msuvis_products.set_timestamps(timestamps);
+                //     msuvis_product.set_proj_cfg(loadJsonFile(resources::getResourcePath("projections_settings/meteor_m2-2_kmss_msu100_1.json")));
+
+                satdump::ChannelTransform t1, t2, t3;
+                t1.init_none(), t2.init_none(), t3.init_none();
+                if (!sat_cfg["msu_vis_1"]["1"].is_null())
+                    t1 = sat_cfg["msu_vis_1"]["1"];
+                if (!sat_cfg["msu_vis_1"]["2"].is_null())
+                    t2 = sat_cfg["msu_vis_1"]["2"];
+                if (!sat_cfg["msu_vis_1"]["3"].is_null())
+                    t3 = sat_cfg["msu_vis_1"]["3"];
+
+                msuvis_product.images.push_back({0, "MSUGS-VIS-1", "1", vis1_reader.getImage1(), 10, t1});
+                msuvis_product.images.push_back({1, "MSUGS-VIS-2", "2", vis2_reader.getImage1(), 10, t2});
+                msuvis_product.images.push_back({2, "MSUGS-VIS-3", "3", vis3_reader.getImage1(), 10, t3});
+
+                msuvis_product.save(directory);
+                dataset.products_list.push_back("MSUGS_VIS1");
+
+                ////////////////////////////////////////////////     mtvza_status = DONE;
+            }
+
+            // MSUVIS2 TODOREWORK
+            {
+                ////////////////////////////////////////// mtvza_status = SAVING;
+                std::string directory = d_output_file_hint.substr(0, d_output_file_hint.rfind('/')) + "/MSUGS_VIS2";
+
+                if (!std::filesystem::exists(directory))
+                    std::filesystem::create_directory(directory);
+
+                //   logger->info("----------- KMSS MSU-100 1");
+                //   logger->info("Lines : " + std::to_string(kmss_lines));
+
+                satdump::products::ImageProduct msuvis_product;
+                msuvis_product.instrument_name = "msugs_vis";
+                //                    msuvis_products.has_timestamps = true; // TODOREWORK
+                //                    msuvis_products.set_tle(satdump::db_tle.get_from_norad(norad));
+                //                    msuvis_products.set_timestamps(timestamps);
+                // msuvis_product.set_proj_cfg_tle_timestamps(loadJsonFile(resources::getResourcePath("projections_settings/elektro_l3_msugs_vis2.json")),
+                //                                            satdump::db_tle->get_from_norad(44903), vis1_reader.timestamps);
+
+                satdump::ChannelTransform t1, t2, t3;
+                t1.init_none(), t2.init_none(), t3.init_none();
+                if (!sat_cfg["msu_vis_2"]["1"].is_null())
+                    t1 = sat_cfg["msu_vis_2"]["1"];
+                if (!sat_cfg["msu_vis_2"]["2"].is_null())
+                    t2 = sat_cfg["msu_vis_2"]["2"];
+                if (!sat_cfg["msu_vis_2"]["3"].is_null())
+                    t3 = sat_cfg["msu_vis_2"]["3"];
+
+                msuvis_product.images.push_back({0, "MSUGS-VIS-1", "1", vis1_reader.getImage2(), 10, t1});
+                msuvis_product.images.push_back({1, "MSUGS-VIS-2", "2", vis2_reader.getImage2(), 10, t2});
+                msuvis_product.images.push_back({2, "MSUGS-VIS-3", "3", vis3_reader.getImage2(), 10, t3});
+
+                msuvis_product.save(directory);
+                dataset.products_list.push_back("MSUGS_VIS2");
+
+                ////////////////////////////////////////////////     mtvza_status = DONE;
+            }
+
+#if 0
             channels_statuses[0] = channels_statuses[1] = channels_statuses[2] = PROCESSING;
             image::Image image1 = vis1_reader.getImage();
             image::Image image2 = vis2_reader.getImage();
             image::Image image3 = vis3_reader.getImage();
 
-            image1.crop(0, 1421, 12008, 1421 + 12008);
+            //     image1.crop(0, 1421, 12008, 1421 + 12008);
             channels_statuses[0] = SAVING;
             image::save_img(image1, directory + "/MSU-GS-1");
             channels_statuses[0] = DONE;
 
-            image2.crop(0, 1421 + 1804, 12008, 1421 + 1804 + 12008);
+            //     image2.crop(0, 1421 + 1804, 12008, 1421 + 1804 + 12008);
             channels_statuses[1] = SAVING;
             image::save_img(image2, directory + "/MSU-GS-2");
             channels_statuses[1] = DONE;
 
-            image3.crop(0, 1421 + 3606, 12008, 1421 + 3606 + 12008);
+            //    image3.crop(0, 1421 + 3606, 12008, 1421 + 3606 + 12008);
             channels_statuses[2] = SAVING;
             image::save_img(image3, directory + "/MSU-GS-3");
             channels_statuses[2] = DONE;
+#endif
 
             for (int i = 0; i < 7; i++)
             {
                 channels_statuses[3 + i] = PROCESSING;
                 logger->info("Channel IR " + std::to_string(i + 4) + "...");
                 image::Image img = infr_reader.getImage(i);
-                img.crop(183, 3294);
+                //        img.crop(183, 3294);
                 channels_statuses[3 + i] = SAVING;
                 image::save_img(img, directory + "/MSU-GS-" + std::to_string(i + 4));
                 channels_statuses[3 + i] = DONE;
             }
 
-            /*
-            logger->info("221 Composite...");
-            {
-                image::Image<uint16_t> image221(image1.width(), std::max<int>(image1.height(), image2.height()), 3);
-                {
-                    image221.draw_image(0, image2, 0, 0);
-                    image221.draw_image(1, image2, 0, 0);
-                    image221.draw_image(2, image1, 0, 0);
-                }
-                image221.white_balance();
-                WRITE_IMAGE(image221, directory + "/MSU-GS-RGB-221");
-            }
-
-            logger->info("Natural Color Composite...");
-            {
-                image::Image<uint16_t> imageNC(image1.width(), std::max<int>(image1.height(), std::max<int>(image2.height(), image3.height())), 3);
-                {
-                    imageNC.draw_image(0, image3, 0, 0);
-                    imageNC.draw_image(1, image2, 0, 0);
-                    imageNC.draw_image(2, image1, 0, 0);
-
-                    image::HueSaturation hueTuning;
-                    hueTuning.hue[image::HUE_RANGE_YELLOW] = -45.0 / 180.0;
-                    hueTuning.hue[image::HUE_RANGE_RED] = 90.0 / 180.0;
-                    hueTuning.overlap = 100.0 / 100.0;
-                    image::hue_saturation(imageNC, hueTuning);
-
-                    imageNC.white_balance();
-                }
-                WRITE_IMAGE(imageNC, directory + "/MSU-GS-RGB-NC");
-            }
-            */
+            dataset.save(d_output_file_hint.substr(0, d_output_file_hint.rfind('/')));
         }
 
         void MSUGSDecoderModule::drawUI(bool window)
@@ -214,22 +300,14 @@ namespace elektro_arktika
                 ImGui::EndTable();
             }
 
-            ImGui::ProgressBar((double)progress / (double)filesize, ImVec2(ImGui::GetContentRegionAvail().x, 20 * ui_scale));
+            drawProgressBar();
 
             ImGui::End();
         }
 
-        std::string MSUGSDecoderModule::getID()
-        {
-            return "elektro_arktika_msugs";
-        }
+        std::string MSUGSDecoderModule::getID() { return "elektro_arktika_msugs"; }
 
-        std::vector<std::string> MSUGSDecoderModule::getParameters()
-        {
-            return {};
-        }
-
-        std::shared_ptr<ProcessingModule> MSUGSDecoderModule::getInstance(std::string input_file, std::string output_file_hint, nlohmann::json parameters)
+        std::shared_ptr<satdump::pipeline::ProcessingModule> MSUGSDecoderModule::getInstance(std::string input_file, std::string output_file_hint, nlohmann::json parameters)
         {
             return std::make_shared<MSUGSDecoderModule>(input_file, output_file_hint, parameters);
         }

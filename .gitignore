@@ -15,3 +15,6 @@ vcpkg/
 srv/
 .env
 .cache
+compile_commands.json
+as.predefined
+deps/

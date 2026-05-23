@@ -6,6 +6,7 @@
 #include <cfloat>
 #include "imgui/imgui.h"
 #include "core/style.h"
+#include "utils/time.h"
 
 #include "common/widgets/azel_input.h"
 
@@ -253,6 +254,8 @@ namespace satdump
         ImGui::Checkbox("Arrow Keys Control", &rotator_arrowkeys_enable);
         if (rotator_arrowkeys_enable)
             ImGui::InputDouble("Arrow Keys Control Increment", &rotator_arrowkeys_increment);
+
+        ImGui::InputDouble("Time Offset", &tracking_time_offset);
     }
 
     nlohmann::json ObjectTracker::getRotatorConfig()

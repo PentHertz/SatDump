@@ -1,10 +1,12 @@
-#include "object_tracker.h"
 #include "common/geodetic/geodetic_coordinates.h"
+#include "common/tracking/tle.h"
+#include "core/style.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_stdlib.h"
-#include "common/utils.h"
-#include "core/style.h"
-#include "common/tracking/tle.h"
+#include "init.h"
+#include "object_tracker.h"
+#include "utils/string.h"
+#include "utils/time.h"
 
 namespace satdump
 {
@@ -12,9 +14,7 @@ namespace satdump
     {
         int d_pplot_size = ImGui::GetWindowContentRegionMax().x;
         ImDrawList *draw_list = ImGui::GetWindowDrawList();
-        draw_list->AddRectFilled(ImGui::GetCursorScreenPos(),
-                                 ImVec2(ImGui::GetCursorScreenPos().x + d_pplot_size, ImGui::GetCursorScreenPos().y + d_pplot_size),
-                                 style::theme.widget_bg);
+        draw_list->AddRectFilled(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + d_pplot_size, ImGui::GetCursorScreenPos().y + d_pplot_size), style::theme.widget_bg);
 
         // Draw the "target-like" plot with elevation rings
         float radius = 0.45;
@@ -22,26 +22,14 @@ namespace satdump
         float radius2 = d_pplot_size * radius * (6.0 / 9.0);
         float radius3 = d_pplot_size * radius * (9.0 / 9.0);
 
-        draw_list->AddCircle({ImGui::GetCursorScreenPos().x + (d_pplot_size / 2),
-                              ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)},
-                             radius1, style::theme.green, 0, 2);
-        draw_list->AddCircle({ImGui::GetCursorScreenPos().x + (d_pplot_size / 2),
-                              ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)},
-                             radius2, style::theme.green, 0, 2);
-        draw_list->AddCircle({ImGui::GetCursorScreenPos().x + (d_pplot_size / 2),
-                              ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)},
-                             radius3, style::theme.green, 0, 2);
+        draw_list->AddCircle({ImGui::GetCursorScreenPos().x + (d_pplot_size / 2), ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)}, radius1, style::theme.green, 0, 2);
+        draw_list->AddCircle({ImGui::GetCursorScreenPos().x + (d_pplot_size / 2), ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)}, radius2, style::theme.green, 0, 2);
+        draw_list->AddCircle({ImGui::GetCursorScreenPos().x + (d_pplot_size / 2), ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)}, radius3, style::theme.green, 0, 2);
 
-        draw_list->AddLine({ImGui::GetCursorScreenPos().x + (d_pplot_size / 2),
-                            ImGui::GetCursorScreenPos().y},
-                           {ImGui::GetCursorScreenPos().x + (d_pplot_size / 2),
-                            ImGui::GetCursorScreenPos().y + d_pplot_size},
-                           style::theme.green, 2);
-        draw_list->AddLine({ImGui::GetCursorScreenPos().x,
-                            ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)},
-                           {ImGui::GetCursorScreenPos().x + d_pplot_size,
-                            ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)},
-                           style::theme.green, 2);
+        draw_list->AddLine({ImGui::GetCursorScreenPos().x + (d_pplot_size / 2), ImGui::GetCursorScreenPos().y},
+                           {ImGui::GetCursorScreenPos().x + (d_pplot_size / 2), ImGui::GetCursorScreenPos().y + d_pplot_size}, style::theme.green, 2);
+        draw_list->AddLine({ImGui::GetCursorScreenPos().x, ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)},
+                           {ImGui::GetCursorScreenPos().x + d_pplot_size, ImGui::GetCursorScreenPos().y + (d_pplot_size / 2)}, style::theme.green, 2);
 
         // Draw the satellite's trace
         if (upcoming_pass_points.size() > 1)
@@ -62,9 +50,7 @@ namespace satdump
                 point_x2 += az_el_to_plot_x(d_pplot_size, radius, p2.az, p2.el);
                 point_y2 -= az_el_to_plot_y(d_pplot_size, radius, p2.az, p2.el);
 
-                draw_list->AddLine({point_x1, point_y1},
-                                   {point_x2, point_y2},
-                                   style::theme.orange, 2.0);
+                draw_list->AddLine({point_x1, point_y1}, {point_x2, point_y2}, style::theme.orange, 2.0);
             }
             upcoming_passes_mtx.unlock();
         }
@@ -150,9 +136,8 @@ namespace satdump
             int minutes = fmod(timeOffset / 60, 60);
             int seconds = fmod(timeOffset, 60);
 
-            std::string time_dis = (hours < 10 ? "0" : "") + std::to_string(hours) + ":" +
-                                   (minutes < 10 ? "0" : "") + std::to_string(minutes) + ":" +
-                                   (seconds < 10 ? "0" : "") + std::to_string(seconds);
+            std::string time_dis =
+                (hours < 10 ? "0" : "") + std::to_string(hours) + ":" + (minutes < 10 ? "0" : "") + std::to_string(minutes) + ":" + (seconds < 10 ? "0" : "") + std::to_string(seconds);
 
             auto &style = ImGui::GetStyle();
             ImVec2 cur = ImGui::GetCursorPos();
@@ -234,7 +219,7 @@ namespace satdump
                 {
                     bool show = true;
                     if (horizons_searchstr.size() != 0)
-                        show = isStringPresent(horizonsoptions[i].second, horizons_searchstr);
+                        show = satdump::isStringPresent(horizonsoptions[i].second, horizons_searchstr);
                     if (show)
                     {
                         if (ImGui::Selectable(horizonsoptions[i].second.c_str(), i == current_horizons_id))
@@ -274,7 +259,10 @@ namespace satdump
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("NORAD ID %d", (*general_tle_registry)[current_satellite_id].norad);
+            {
+                auto reg = db_tle->all;
+                ImGui::SetTooltip("NORAD ID %d", reg[current_satellite_id].norad);
+            }
         }
 
         if (backend_needs_update)
@@ -312,9 +300,8 @@ namespace satdump
                 int minutes = fmod(timeOffset / 60, 60);
                 int seconds = fmod(timeOffset, 60);
 
-                std::string time_dis = (hours < 10 ? "0" : "") + std::to_string(hours) + ":" +
-                                       (minutes < 10 ? "0" : "") + std::to_string(minutes) + ":" +
-                                       (seconds < 10 ? "0" : "") + std::to_string(seconds);
+                std::string time_dis =
+                    (hours < 10 ? "0" : "") + std::to_string(hours) + ":" + (minutes < 10 ? "0" : "") + std::to_string(minutes) + ":" + (seconds < 10 ? "0" : "") + std::to_string(seconds);
 
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
@@ -347,4 +334,4 @@ namespace satdump
             ImGui::EndTable();
         }
     }
-}
+} // namespace satdump
